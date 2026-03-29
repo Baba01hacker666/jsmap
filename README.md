@@ -1,4 +1,4 @@
-# jsmap-suite
+# jsmap
 
 ```
      ██╗███████╗███╗   ███╗ █████╗ ██████╗       ███████╗██╗   ██╗██╗████████╗███████╗
@@ -11,7 +11,7 @@
 
 **Enhanced Modular JavaScript Recon Suite** — Webpack chunk harvesting, secret/endpoint extraction, source map reconstruction, and Angular build integration for web application security assessments.
 
-> Developed by **baba01hacker** · [Doraemon Cyber Team (DCT)](https://github.com)
+> Developed by **baba01hacker** · [Doraemon Cyber Team (DCT)](https://github.com/Baba01hacker666)
 
 ---
 
@@ -25,7 +25,7 @@ jsmap-suite is an offensive reconnaissance tool targeting modern JavaScript-heav
 Phase 1: Download    →  Auto-detect runtime.js, extract chunk map, download all JS chunks + .map files
 Phase 2: Extract     →  Multi-engine analysis: native regex, TruffleHog, ripgrep
 Phase 3: Reconstruct →  Source tree recovery from .map files
-Phase 4: Build       →  Scaffold Angular project + ng build --configuration production
+Phase 4: Build       →  Scaffold Angular project + ng build --configuration production (Optional)
 ```
 
 ---
@@ -84,8 +84,8 @@ Phase 4: Build       →  Scaffold Angular project + ng build --configuration pr
 **Requirements:** Python 3.9+
 
 ```bash
-git clone https://github.com/baba01hacker/jsmap-suite
-cd jsmap-suite
+git clone https://github.com/Baba01hacker666/jsmap
+cd jsmap
 pip install requests urllib3
 ```
 
