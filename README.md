@@ -15,18 +15,6 @@
 
 ---
 
-## Overview
-
-jsmap-suite is an offensive reconnaissance tool targeting modern JavaScript-heavy web applications (Angular, React, Webpack). It automates the full recon pipeline from chunk discovery to source recovery, surfacing hardcoded secrets, internal API endpoints, environment configs, and debug artifacts that developers accidentally ship to production.
-
-**4-phase pipeline:**
-
-```
-Phase 1: Download    →  Auto-detect runtime.js, extract chunk map, download all JS chunks + .map files
-Phase 2: Extract     →  Multi-engine analysis: native regex, TruffleHog, ripgrep
-Phase 3: Reconstruct →  Source tree recovery from .map files
-Phase 4: Build       →  Scaffold Angular project + ng build --configuration production (Optional)
-```
 --
 
 ## Installation
@@ -57,6 +45,20 @@ npm install -g @angular/cli
 ```
 
 ---
+
+## Overview
+
+jsmap-suite is an offensive reconnaissance tool targeting modern JavaScript-heavy web applications (Angular, React, Webpack). It automates the full recon pipeline from chunk discovery to source recovery, surfacing hardcoded secrets, internal API endpoints, environment configs, and debug artifacts that developers accidentally ship to production.
+
+**4-phase pipeline:**
+
+```
+Phase 1: Download    →  Auto-detect runtime.js, extract chunk map, download all JS chunks + .map files
+Phase 2: Extract     →  Multi-engine analysis: native regex, TruffleHog, ripgrep
+Phase 3: Reconstruct →  Source tree recovery from .map files
+Phase 4: Build       →  Scaffold Angular project + ng build --configuration production (Optional)
+```
+
 
 ---
 
