@@ -27,6 +27,36 @@ Phase 2: Extract     →  Multi-engine analysis: native regex, TruffleHog, ripgr
 Phase 3: Reconstruct →  Source tree recovery from .map files
 Phase 4: Build       →  Scaffold Angular project + ng build --configuration production (Optional)
 ```
+--
+
+## Installation
+
+**Requirements:** Python 3.9+
+
+```bash
+git clone https://github.com/Baba01hacker666/jsmap
+cd jsmap
+pip install requests urllib3
+```
+
+**Optional external tools (for `--all-extractors`):**
+
+```bash
+# TruffleHog
+curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh
+
+# ripgrep
+apt install ripgrep   # Debian/Ubuntu
+brew install ripgrep  # macOS
+```
+
+**For `--ng-build` (Phase 4):**
+
+```bash
+npm install -g @angular/cli
+```
+
+---
 
 ---
 
@@ -77,36 +107,6 @@ Phase 4: Build       →  Scaffold Angular project + ng build --configuration pr
 | Debug | Admin panel paths (`/admin`, `/swagger`, `/api-docs`) | HIGH |
 | Debug | `sourceMappingURL` comment in JS | MEDIUM |
 
----
-
-## Installation
-
-**Requirements:** Python 3.9+
-
-```bash
-git clone https://github.com/Baba01hacker666/jsmap
-cd jsmap
-pip install requests urllib3
-```
-
-**Optional external tools (for `--all-extractors`):**
-
-```bash
-# TruffleHog
-curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh
-
-# ripgrep
-apt install ripgrep   # Debian/Ubuntu
-brew install ripgrep  # macOS
-```
-
-**For `--ng-build` (Phase 4):**
-
-```bash
-npm install -g @angular/cli
-```
-
----
 
 ## Usage
 
