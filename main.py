@@ -21,6 +21,7 @@ import hashlib
 import argparse
 import requests
 import urllib3
+import base64
 import subprocess
 from pathlib import Path
 from dataclasses import dataclass, asdict
@@ -255,6 +256,20 @@ class ChunkDownloader:
                         chunk_map[chunk_id] = chunk_hash
                 except Exception:
                     continue
+
+        # Modern Esbuild/Angular 17+ ternary expressions
+        for m in re.finditer(r'(?:[a-zA-Z0-9_]+\s*===\s*(\d+)\s*\?\s*["\']([a-f0-9]{8,})["\'])', content):
+            chunk_map[m.group(1)] = m.group(2)
+        for m in re.finditer(r'(?:(\d+)\s*===\s*[a-zA-Z0-9_]+\s*\?\s*["\']([a-f0-9]{8,})["\'])', content):
+            chunk_map[m.group(1)] = m.group(2)
+
+        # Modern Esbuild/Angular 17+ array expressions
+        for m in re.finditer(r'\[(\s*(?:["\'][a-f0-9]{8,}["\']\s*,\s*)+["\'][a-f0-9]{8,}["\']\s*)\]', content):
+            hashes = re.findall(r'["\']([a-f0-9]{8,})["\']', m.group(1))
+            if len(hashes) > 1:
+                for idx, h in enumerate(hashes):
+                    chunk_map[str(idx)] = h
+
         return chunk_map
 
     def extract_named_chunks(self, content: str) -> dict:
@@ -522,15 +537,27 @@ class ChunkDownloader:
             if not map_ref:
                 continue
             ref_val = map_ref.group(1).strip()
-            if ref_val.startswith("data:"):
-                continue
-            map_url = urljoin(self.base_url, ref_val)
             map_name = js_file.name + ".map"
-            # Store in both chunks (for compatibility) and maps dir
             map_path_chunks = chunks_dir / map_name
             map_path_maps = self.layout.maps_dir / map_name
+
             if map_path_maps.exists():
                 continue
+
+            if ref_val.startswith("data:"):
+                b64_match = re.search(r"data:application/json(?:;charset=[^;]+)?;base64,([a-zA-Z0-9+/=]+)", ref_val)
+                if b64_match:
+                    try:
+                        b64_data = b64_match.group(1)
+                        decoded = base64.b64decode(b64_data)
+                        map_path_chunks.write_bytes(decoded)
+                        map_path_maps.write_bytes(decoded)
+                        map_count += 1
+                    except Exception:
+                        pass
+                continue
+
+            map_url = urljoin(self.base_url, ref_val)
             try:
                 mr = self.session.get(map_url, timeout=10)
                 if mr.status_code == 200:
