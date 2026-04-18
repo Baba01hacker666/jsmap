@@ -21,7 +21,6 @@ import hashlib
 import argparse
 import bisect
 import os
-import threading
 import requests
 import urllib3
 import base64
@@ -30,7 +29,12 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+    FIRST_COMPLETED,
+)
 from urllib.parse import urljoin, urlparse
 from typing import List, Dict, Optional, Callable, Any, Tuple
 from abc import ABC, abstractmethod
@@ -625,27 +629,30 @@ class BaseExtractor(ABC):
 
     def analyze_directory(self, dir_path: Path) -> List[Finding]:
         supported = set(self.supported_extensions)
-        files = [
-            f
-            for f in dir_path.rglob("*")
-            if f.is_file() and f.suffix in supported
-        ]
-        if not files:
-            return []
-
         findings: List[Finding] = []
         max_workers = min(32, max(4, (os.cpu_count() or 4)))
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_file = {
-                executor.submit(self.analyze_file, file_path): file_path
-                for file_path in files
-            }
-            for future in as_completed(future_to_file):
-                file_path = future_to_file[future]
+
+        def _collect_done(done_futures):
+            for future in done_futures:
                 try:
                     findings.extend(future.result())
                 except Exception as e:
-                    warn(f"{self.name} failed on {file_path.name}: {e}")
+                    warn(f"{self.name} failed: {e}")
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            pending = set()
+            queue_limit = max_workers * 4
+            for file_path in dir_path.rglob("*"):
+                if not file_path.is_file() or file_path.suffix not in supported:
+                    continue
+                pending.add(executor.submit(self.analyze_file, file_path))
+                if len(pending) >= queue_limit:
+                    done, pending = wait(
+                        pending, return_when=FIRST_COMPLETED
+                    )
+                    _collect_done(done)
+            if pending:
+                _collect_done(as_completed(pending))
         return findings
 
 
@@ -900,8 +907,6 @@ class NativeRegexExtractor(BaseExtractor):
 
     def __init__(self, min_severity: str = "INFO"):
         self.min_severity = min_severity
-        self.seen: set[str] = set()
-        self._seen_lock = threading.Lock()
         self._sev_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
         self._compiled_rules = self._compile_rules()
 
@@ -944,6 +949,7 @@ class NativeRegexExtractor(BaseExtractor):
 
         lines = content.splitlines()
         findings = []
+        seen_in_file: set[str] = set()
 
         newline_positions = [
             pos for pos, ch in enumerate(content) if ch == "\n"
@@ -972,10 +978,9 @@ class NativeRegexExtractor(BaseExtractor):
                             if any(bl.search(value) for bl in blacklist):
                                 continue
                             dk = self._dedup(name, value)
-                            with self._seen_lock:
-                                if dk in self.seen:
-                                    continue
-                                self.seen.add(dk)
+                            if dk in seen_in_file:
+                                continue
+                            seen_in_file.add(dk)
 
                             line_no = (
                                 bisect.bisect_right(newline_positions, m.start())
@@ -1121,10 +1126,20 @@ class ExtractorOrchestrator:
         return self._deduplicate(all_findings)
 
     def _deduplicate(self, findings: List[Finding]) -> List[Finding]:
+        findings = sorted(
+            findings,
+            key=lambda f: (
+                f.category,
+                f.subcategory,
+                f.value[:50],
+                f.file,
+                f.line,
+            ),
+        )
         seen, unique = set(), []
         for f in findings:
             key = hashlib.md5(
-                f"{f.category}:{f.subcategory}:{f.value[:50]}:{f.line}".encode()
+                f"{f.category}:{f.subcategory}:{f.value[:50]}:{f.file}:{f.line}".encode()
             ).hexdigest()
             if key not in seen:
                 seen.add(key)
