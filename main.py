@@ -19,6 +19,8 @@ import time
 import shutil
 import hashlib
 import argparse
+import bisect
+import os
 import requests
 import urllib3
 import base64
@@ -27,7 +29,12 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 from collections import defaultdict
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+    FIRST_COMPLETED,
+)
 from urllib.parse import urljoin, urlparse
 from typing import List, Dict, Optional, Callable, Any, Tuple
 from abc import ABC, abstractmethod
@@ -621,14 +628,31 @@ class BaseExtractor(ABC):
         pass
 
     def analyze_directory(self, dir_path: Path) -> List[Finding]:
-        findings = []
-        for ext in self.supported_extensions:
-            for f in dir_path.rglob(f"*{ext}"):
-                if f.is_file():
-                    try:
-                        findings.extend(self.analyze_file(f))
-                    except Exception as e:
-                        warn(f"{self.name} failed on {f.name}: {e}")
+        supported = set(self.supported_extensions)
+        findings: List[Finding] = []
+        max_workers = min(32, max(4, (os.cpu_count() or 4)))
+
+        def _collect_done(done_futures):
+            for future in done_futures:
+                try:
+                    findings.extend(future.result())
+                except Exception as e:
+                    warn(f"{self.name} failed: {e}")
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            pending = set()
+            queue_limit = max_workers * 4
+            for file_path in dir_path.rglob("*"):
+                if not file_path.is_file() or file_path.suffix not in supported:
+                    continue
+                pending.add(executor.submit(self.analyze_file, file_path))
+                if len(pending) >= queue_limit:
+                    done, pending = wait(
+                        pending, return_when=FIRST_COMPLETED
+                    )
+                    _collect_done(done)
+            if pending:
+                _collect_done(as_completed(pending))
         return findings
 
 
@@ -883,8 +907,30 @@ class NativeRegexExtractor(BaseExtractor):
 
     def __init__(self, min_severity: str = "INFO"):
         self.min_severity = min_severity
-        self.seen: set[str] = set()
         self._sev_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+        self._compiled_rules = self._compile_rules()
+
+    def _compile_rules(self) -> Dict[str, List[Dict[str, Any]]]:
+        compiled: Dict[str, List[Dict[str, Any]]] = {}
+        for category, rule_list in self.RULES.items():
+            compiled_rules = []
+            for rule in rule_list:
+                compiled_rules.append(
+                    {
+                        "name": str(rule["name"]),
+                        "severity": str(rule["severity"]),
+                        "patterns": [
+                            re.compile(p, re.MULTILINE | re.DOTALL)
+                            for p in rule["patterns"]
+                        ],
+                        "blacklist": [
+                            re.compile(bl, re.IGNORECASE)
+                            for bl in rule.get("blacklist", [])
+                        ],
+                    }
+                )
+            compiled[category] = compiled_rules
+        return compiled
 
     def _sev_ok(self, sev: str) -> bool:
         return self._sev_order.index(sev) <= self._sev_order.index(
@@ -903,22 +949,25 @@ class NativeRegexExtractor(BaseExtractor):
 
         lines = content.splitlines()
         findings = []
+        seen_in_file: set[str] = set()
 
-        for category, rule_list in self.RULES.items():
+        newline_positions = [
+            pos for pos, ch in enumerate(content) if ch == "\n"
+        ]
+
+        for category, rule_list in self._compiled_rules.items():
             for rule in rule_list:
-                name = str(rule["name"])
-                severity = str(rule["severity"])
+                name = rule["name"]
+                severity = rule["severity"]
                 patterns = rule["patterns"]
-                blacklist = rule.get("blacklist", [])
+                blacklist = rule["blacklist"]
 
                 if not self._sev_ok(severity):
                     continue
 
                 for pattern in patterns:
                     try:
-                        for m in re.finditer(
-                            pattern, content, re.MULTILINE | re.DOTALL
-                        ):
+                        for m in pattern.finditer(content):
                             value = (
                                 m.group(1)
                                 if m.lastindex and m.lastindex >= 1
@@ -926,17 +975,17 @@ class NativeRegexExtractor(BaseExtractor):
                             ).strip()
                             if not value or len(value) < 3:
                                 continue
-                            if any(
-                                re.search(bl, value, re.IGNORECASE)
-                                for bl in blacklist
-                            ):
+                            if any(bl.search(value) for bl in blacklist):
                                 continue
                             dk = self._dedup(name, value)
-                            if dk in self.seen:
+                            if dk in seen_in_file:
                                 continue
-                            self.seen.add(dk)
+                            seen_in_file.add(dk)
 
-                            line_no = content[: m.start()].count("\n") + 1
+                            line_no = (
+                                bisect.bisect_right(newline_positions, m.start())
+                                + 1
+                            )
                             ctx_s = max(0, line_no - 2)
                             ctx_e = min(len(lines), line_no + 1)
                             context = " | ".join(
@@ -1077,10 +1126,20 @@ class ExtractorOrchestrator:
         return self._deduplicate(all_findings)
 
     def _deduplicate(self, findings: List[Finding]) -> List[Finding]:
+        findings = sorted(
+            findings,
+            key=lambda f: (
+                f.category,
+                f.subcategory,
+                f.value[:50],
+                f.file,
+                f.line,
+            ),
+        )
         seen, unique = set(), []
         for f in findings:
             key = hashlib.md5(
-                f"{f.category}:{f.subcategory}:{f.value[:50]}:{f.line}".encode()
+                f"{f.category}:{f.subcategory}:{f.value[:50]}:{f.file}:{f.line}".encode()
             ).hexdigest()
             if key not in seen:
                 seen.add(key)
@@ -1777,7 +1836,7 @@ def build_session(args) -> requests.Session:
     return session
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="jsmap-suite — Enhanced Modular JS Recon Tool",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -1900,10 +1959,10 @@ EXAMPLES:
     net.add_argument("-H", "--header", action="append", default=[])
 
     parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
-    banner()
+    return parser
 
-    # ── validation ────────────────────────────────────────────────────────────
+
+def validate_args(args, parser: argparse.ArgumentParser):
     if not args.url and not args.analyze_only and not args.ng_only:
         parser.print_help()
         sys.exit(1)
@@ -1911,15 +1970,45 @@ EXAMPLES:
         error("--analyze-only requires --dir")
         sys.exit(1)
 
-    # ── build output layout ───────────────────────────────────────────────────
-    if args.output:
-        root = Path(args.output)
-    elif args.url:
-        host = urlparse(args.url).netloc.replace(":", "_")
-        root = Path(f"jsmap_{host}_{datetime.now():%Y%m%d_%H%M%S}")
-    else:
-        root = Path(f"jsmap_analysis_{datetime.now():%Y%m%d_%H%M%S}")
 
+def resolve_output_root(args) -> Path:
+    if args.output:
+        return Path(args.output)
+    if args.url:
+        host = urlparse(args.url).netloc.replace(":", "_")
+        return Path(f"jsmap_{host}_{datetime.now():%Y%m%d_%H%M%S}")
+    return Path(f"jsmap_analysis_{datetime.now():%Y%m%d_%H%M%S}")
+
+
+def configure_extractors(args) -> ExtractorOrchestrator:
+    orchestrator = ExtractorOrchestrator()
+    if not (args.all_extractors or args.use_trufflehog or args.use_ripgrep):
+        args.native_only = True
+
+    orchestrator.register(NativeRegexExtractor(args.severity))
+
+    if args.all_extractors or args.use_trufflehog:
+        th = TruffleHogExtractor()
+        if th.is_available():
+            orchestrator.register(th)
+        else:
+            warn("TruffleHog not found in PATH, skipping")
+
+    if args.all_extractors or args.use_ripgrep:
+        rg = RipgrepExtractor()
+        if rg.is_available():
+            orchestrator.register(rg)
+        else:
+            warn("ripgrep not found in PATH, skipping")
+    return orchestrator
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    banner()
+    validate_args(args, parser)
+    root = resolve_output_root(args)
     layout = OutputLayout(root)
     layout.create_all()
 
@@ -1972,26 +2061,7 @@ EXAMPLES:
 
     # ── Phase 2: Extract/Analyze ──────────────────────────────────────────────
     step(2, "EXTRACTING & ANALYZING")
-    orchestrator = ExtractorOrchestrator()
-
-    if not (args.all_extractors or args.use_trufflehog or args.use_ripgrep):
-        args.native_only = True
-
-    orchestrator.register(NativeRegexExtractor(args.severity))
-
-    if args.all_extractors or args.use_trufflehog:
-        th = TruffleHogExtractor()
-        if th.is_available():
-            orchestrator.register(th)
-        else:
-            warn("TruffleHog not found in PATH, skipping")
-
-    if args.all_extractors or args.use_ripgrep:
-        rg = RipgrepExtractor()
-        if rg.is_available():
-            orchestrator.register(rg)
-        else:
-            warn("ripgrep not found in PATH, skipping")
+    orchestrator = configure_extractors(args)
 
     findings = orchestrator.analyze(chunks_dir)
 
