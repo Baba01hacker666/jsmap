@@ -505,9 +505,9 @@ class RipgrepExtractor(ExternalToolExtractor):
                     "-e",
                     r"(api|v\d|graphql|rest)/",
                     "-e",
-                    r"AKIA[0-9A-Z]{16}",
+                    r"AKIA[0-9A-Z]{{16}}",
                     "-e",
-                    r"AIza[0-9A-Za-z\-_]{35}",
+                    r"AIza[0-9A-Za-z\-_]{{35}}",
                 ]
             )
         cmd.append("{file}")
