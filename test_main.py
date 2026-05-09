@@ -4,12 +4,14 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
-# Import the main module
-import main
+# Import the new core modules
+from core.extractors import NativeRegexExtractor
+from core.downloader import ChunkDownloader
+from core.reconstructor import SourceMapReconstructor
 
 class TestNativeRegexExtractor(unittest.TestCase):
     def setUp(self):
-        self.extractor = main.NativeRegexExtractor(min_severity="INFO")
+        self.extractor = NativeRegexExtractor(min_severity="INFO")
 
     def _test_extraction(self, content: str, expected_subcategory: str):
         with tempfile.NamedTemporaryFile("w", delete=False, suffix=".js", encoding="utf-8") as f:
@@ -47,7 +49,7 @@ class TestChunkDownloader(unittest.TestCase):
     def setUp(self):
         session = MagicMock()
         layout = MagicMock()
-        self.downloader = main.ChunkDownloader(session, "http://target.com", layout)
+        self.downloader = ChunkDownloader(session, "http://target.com", layout)
 
     def test_extract_chunk_map_from_runtime(self):
         # Test standard webpack object matching format matching the regex
@@ -66,7 +68,7 @@ class TestChunkDownloader(unittest.TestCase):
 class TestSourceMapReconstructor(unittest.TestCase):
     def setUp(self):
         layout = MagicMock()
-        self.recon = main.SourceMapReconstructor(layout)
+        self.recon = SourceMapReconstructor(layout)
 
     def test_sanitize_path_webpack_prefix(self):
         path = "webpack:///src/app.js"
