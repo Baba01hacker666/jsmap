@@ -25,6 +25,9 @@ import requests
 import urllib3
 import base64
 import subprocess
+import random
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from collections import defaultdict
@@ -312,6 +315,9 @@ class ChunkDownloader:
             "dist/",
             "build/",
             "public/",
+            "_next/static/chunks/",
+            "_next/static/chunks/pages/",
+            "_nuxt/",
             "",
         ]
         for prefix in alt_prefixes:
@@ -346,7 +352,9 @@ class ChunkDownloader:
             }
 
         if self.delay > 0:
-            time.sleep(self.delay)
+            # OPSEC: Add ±20% jitter to evade simple timing-based rate limits
+            jitter = random.uniform(0.8, 1.2)
+            time.sleep(self.delay * jitter)
 
         try:
             resp = self.session.get(url, timeout=15)
@@ -779,7 +787,21 @@ class NativeRegexExtractor(BaseExtractor):
             {
                 "name": "Private Key (PEM)",
                 "severity": "CRITICAL",
-                "patterns": [r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----"],
+                "patterns": [r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"],
+            },
+            {
+                "name": "Azure Storage Account Key",
+                "severity": "CRITICAL",
+                "patterns": [
+                    r'(?:AccountKey|SharedAccessKey)[=:]\s*["\']([a-zA-Z0-9+/=]{88})["\']'
+                ]
+            },
+            {
+                "name": "Slack Bot Token",
+                "severity": "CRITICAL",
+                "patterns": [
+                    r'(xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24})'
+                ]
             },
             {
                 "name": "Slack Webhook",
@@ -1818,7 +1840,25 @@ def write_summary(
 
 def build_session(args) -> requests.Session:
     session = requests.Session()
+    
+    # OPSEC: Add retry logic with exponential backoff for WAFs / throttling
+    retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    
     headers = {**DEFAULT_HEADERS}
+    
+    # OPSEC: Randomize User-Agent
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edge/123.0.0.0 Safari/537.36"
+    ]
+    headers["User-Agent"] = random.choice(user_agents)
+    
     if hasattr(args, "url") and args.url:
         headers["Referer"] = args.url
     session.headers.update(headers)
