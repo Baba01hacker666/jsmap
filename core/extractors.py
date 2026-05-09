@@ -255,7 +255,7 @@ class NativeRegexExtractor(BaseExtractor):
                 ],
             },
         ],
-        "angular": [
+        "frameworks": [
             {
                 "name": "Angular Route",
                 "severity": "INFO",
@@ -274,10 +274,27 @@ class NativeRegexExtractor(BaseExtractor):
                 ],
             },
             {
-                "name": "Angular Environment",
+                "name": "Vue Router",
+                "severity": "INFO",
+                "patterns": [
+                    r'path\s*:\s*["\']([^"\']{1,150})["\']\s*,\s*(?:name|component)',
+                    r'router\.push\(\s*["\']([^"\']{1,150})["\']\s*\)',
+                ],
+            },
+            {
+                "name": "Next.js / Nuxt Routing",
+                "severity": "INFO",
+                "patterns": [
+                    r'router\.(?:push|replace)\(\s*["\']([^"\']{1,150})["\']\s*\)',
+                    r'pages/([^"\']+)\.js',
+                ],
+            },
+            {
+                "name": "Environment Config",
                 "severity": "MEDIUM",
                 "patterns": [
                     r"export\s+const\s+environment\s*=\s*(\{[^}]{20,800}\})",
+                    r"__NUXT__\s*=\s*(\{[^;]+\});",
                 ],
             },
         ],

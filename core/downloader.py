@@ -210,10 +210,23 @@ class ChunkDownloader:
             resp = self.session.get(self.base_url, timeout=15)
             html = resp.text
 
+            # Match .js and .mjs files from <script> and link[rel="modulepreload"] tags
             raw_srcs = re.findall(
-                r'<script[^>]+src=["\']([^"\']+\.js[^"\']*)["\']', html
+                r'<(?:script|link)[^>]+(?:src|href)=["\']([^"\']+\.(?:js|mjs)[^"\']*)["\']', html
             )
-            raw_srcs += re.findall(r'"([^"]*\.js)"', html)
+            raw_srcs += re.findall(r'"([^"]*\.(?:js|mjs))"', html)
+            
+            # Next.js / Nuxt / Vite specific inline data and manifests
+            next_data = re.search(r'__NEXT_DATA__\s*=\s*({.*?})</script>', html, re.DOTALL)
+            if next_data:
+                try:
+                    data = json.loads(next_data.group(1))
+                    build_id = data.get('buildId')
+                    if build_id:
+                        raw_srcs.append(f"/_next/static/{build_id}/_buildManifest.js")
+                        raw_srcs.append(f"/_next/static/{build_id}/_ssgManifest.js")
+                except Exception:
+                    pass
 
             for src in raw_srcs:
                 try:
@@ -227,7 +240,7 @@ class ChunkDownloader:
                 (
                     u
                     for u in all_scripts
-                    if re.search(r"runtime", u, re.IGNORECASE)
+                    if re.search(r"(?:runtime|manifest|webpack-)", u, re.IGNORECASE)
                 ),
                 None,
             )
@@ -236,6 +249,7 @@ class ChunkDownloader:
                     "runtime.js",
                     "runtime.min.js",
                     "webpack-runtime.js",
+                    "manifest.js",
                 ]:
                     test = urljoin(self.base_url, g)
                     try:

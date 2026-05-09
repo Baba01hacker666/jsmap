@@ -22,21 +22,21 @@ from core.reporting import ReportGenerator, write_summary
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="jsmap-suite — Enhanced Modular JS Recon Tool",
+        description="jsmap-suite — Enhanced Modular JS Recon Tool (React/Vue/Angular/Next.js/Static)",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""
 EXAMPLES:
-  Full recon + ng build:
-    python3 jsmap_suite.py https://app.target.com/ --all-extractors --ng-build
+  Full recon, extract sources (Angular/React/Vue/Next.js):
+    python3 main.py https://app.target.com/ --all-extractors --extract-sources
 
-  Extract sources only, then build:
-    python3 jsmap_suite.py https://app.target.com/ --extract-sources --ng-build
+  Full recon + ng build (Angular targets only):
+    python3 main.py https://app.target.com/ --all-extractors --ng-build
 
   Use external tools (trufflehog + ripgrep):
-    python3 jsmap_suite.py https://app.target.com/ --use-trufflehog --use-ripgrep
+    python3 main.py https://app.target.com/ --use-trufflehog --use-ripgrep
 
-  Analyze existing directory:
-    python3 jsmap_suite.py --analyze-only --dir ./chunks
+  Analyze existing directory of static JS chunks:
+    python3 main.py --analyze-only --dir ./chunks
 
   Download only, custom output dir:
     python3 jsmap_suite.py https://app.target.com/ --download-only -o /tmp/recon

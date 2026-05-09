@@ -45,6 +45,14 @@ class TestNativeRegexExtractor(unittest.TestCase):
         content = 'axios.get("/api/v1/users/admin");'
         self._test_extraction(content, "REST API Path")
 
+    def test_vue_router_extraction(self):
+        content = "const routes = [{ path: '/dashboard', component: Dashboard }];"
+        self._test_extraction(content, "Vue Router")
+
+    def test_next_routing_extraction(self):
+        content = "router.push('/hidden/admin/panel');"
+        self._test_extraction(content, "Next.js / Nuxt Routing")
+
 class TestChunkDownloader(unittest.TestCase):
     def setUp(self):
         session = MagicMock()
