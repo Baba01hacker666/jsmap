@@ -202,6 +202,30 @@ class ChunkDownloader:
 
     # ── auto-detect ───────────────────────────────────────────────────────────
 
+    def _is_cdn_or_vendor_script(self, url: str) -> bool:
+        """Heuristic check to skip common CDN/vendor scripts that add noise."""
+        blacklist = [
+            r'ajax\.googleapis\.com',
+            r'cdnjs\.cloudflare\.com',
+            r'cdn\.jsdelivr\.net',
+            r'unpkg\.com',
+            r'code\.jquery\.com',
+            r'stackpath\.bootstrapcdn\.com',
+            r'use\.fontawesome\.com',
+            r'www\.google-analytics\.com',
+            r'www\.googletagmanager\.com',
+            r'connect\.facebook\.net',
+            r'js\.stripe\.com',
+            r'cdn\.segment\.com',
+            r'widget\.intercom\.io',
+            r'cdn\.amplitude\.com',
+            r'browser\.sentry-cdn\.com',
+            r'cdn\.datadoghq-browser-agent\.com',
+            r'polyfill\.io',
+            r'recaptcha/api\.js'
+        ]
+        return any(re.search(b, url, re.IGNORECASE) for b in blacklist)
+
     def auto_detect_chunks(self) -> Tuple[dict, dict, list]:
         chunk_map, special_names, all_scripts = {}, {}, []
 
@@ -231,8 +255,9 @@ class ChunkDownloader:
             for src in raw_srcs:
                 try:
                     full = urljoin(self.base_url, src.split("?")[0])
-                    if full not in all_scripts:
-                        all_scripts.append(full)
+                    if not self._is_cdn_or_vendor_script(full):
+                        if full not in all_scripts:
+                            all_scripts.append(full)
                 except Exception:
                     pass
 
