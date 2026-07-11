@@ -19,6 +19,7 @@ class ScanOptions:
     extract_sources: bool = False
     extract_strings: bool = False
     report_format: str = "json"
+    redact_values: bool = False
 
 
 @dataclass
@@ -35,6 +36,13 @@ class ScanResult:
     @property
     def finding_count(self) -> int:
         return len(self.findings)
+
+    def has_severity_at_least(self, threshold: str) -> bool:
+        """Return whether any finding meets or exceeds *threshold*."""
+        order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+        if threshold not in order:
+            raise ValueError("threshold must be CRITICAL, HIGH, MEDIUM, LOW, or INFO")
+        return any(order.index(item.severity) <= order.index(threshold) for item in self.findings)
 
 
 def analyze_directory(
@@ -54,8 +62,8 @@ def analyze_directory(
     options = options or ScanOptions()
     if options.minimum_severity not in {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}:
         raise ValueError("minimum_severity must be CRITICAL, HIGH, MEDIUM, LOW, or INFO")
-    if options.report_format not in {"json", "csv", "md", "txt", "html"}:
-        raise ValueError("report_format must be json, csv, md, txt, or html")
+    if options.report_format not in {"json", "csv", "md", "txt", "html", "sarif"}:
+        raise ValueError("report_format must be json, csv, md, txt, html, or sarif")
 
     layout = OutputLayout(Path(output).expanduser())
     layout.create_all()
@@ -70,7 +78,7 @@ def analyze_directory(
     if options.extract_strings:
         strings = reconstructor.extract_strings(input_directory)
 
-    reporter = ReportGenerator(findings)
+    reporter = ReportGenerator(findings, redact_values=options.redact_values)
     report_paths = {"json": layout.report_path("json"), "html": layout.report_path("html")}
     reporter.save(report_paths["json"], "json")
     reporter.save(report_paths["html"], "html")

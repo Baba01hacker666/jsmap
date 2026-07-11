@@ -109,6 +109,16 @@ EXAMPLES:
         action="store_true",
         help="Suppress console findings output",
     )
+    an.add_argument(
+        "--redact",
+        action="store_true",
+        help="Redact matched values and context in console and report output",
+    )
+    an.add_argument(
+        "--fail-on",
+        choices=["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+        help="Exit with status 1 when a finding meets this severity threshold",
+    )
 
     # Angular build
     ng = parser.add_argument_group("Angular Build")
@@ -134,7 +144,7 @@ EXAMPLES:
     out.add_argument(
         "--format",
         default="json",
-        choices=["json", "csv", "md", "txt", "html"],
+        choices=["json", "csv", "md", "txt", "html", "sarif"],
     )
 
     # Network
@@ -289,7 +299,7 @@ def main():
         build_ok = builder.run(extracted_sources=src_dir)
 
     # ── Reporting ─────────────────────────────────────────────────────────────
-    reporter = ReportGenerator(findings)
+    reporter = ReportGenerator(findings, redact_values=args.redact)
     if not args.no_print:
         reporter.print_console()
 
@@ -332,3 +342,8 @@ def main():
         )
         print(f"  ng build       : {status}")
     print(f"{'═' * 68}\n")
+    if args.fail_on:
+        severity_order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
+        if any(severity_order.index(f.severity) <= severity_order.index(args.fail_on) for f in findings):
+            warn(f"Failing due to --fail-on {args.fail_on}")
+            sys.exit(1)

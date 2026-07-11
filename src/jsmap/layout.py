@@ -75,5 +75,6 @@ class OutputLayout:
             "md": ".md",
             "txt": ".txt",
             "html": ".html",
+            "sarif": ".sarif",
         }
         return self.reports_dir / f"findings{ext_map.get(fmt, '.json')}"

@@ -162,6 +162,9 @@ jsmap https://app.target.com/ --map ./chunk_map.json
 # Output in Markdown format with 10 threads
 jsmap https://app.target.com/ --format md -t 10
 
+# SARIF report for a code-scanning system; return exit status 1 on high findings
+jsmap --analyze-only --dir ./assets --format sarif --redact --fail-on HIGH
+
 # Rate-limited (500ms delay between requests), verbose
 jsmap https://app.target.com/ -d 0.5 -v
 ```
@@ -275,6 +278,8 @@ src/jsmap/
 ├── network.py         HTTP session configuration
 └── builder.py         Optional Angular build integration
 ```
+
+Report formats include JSON, CSV, Markdown, text, HTML, and SARIF 2.1.0. Use `--redact` when reports might be shared outside the assessment team. Use `--fail-on HIGH` (or another severity) to make a scan suitable for CI gates.
 
 ---
 

@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
@@ -19,8 +20,21 @@ class ReportGenerator:
     }
     SEV_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
 
-    def __init__(self, findings: List[Finding]):
+    def __init__(self, findings: List[Finding], redact_values: bool = False):
         self.findings = findings
+        self.redact_values = redact_values
+
+    def _value(self, value: str, limit: Optional[int] = None) -> str:
+        """Return a report-safe representation without changing findings in memory."""
+        if self.redact_values:
+            value = "[REDACTED]"
+        return value[:limit] if limit else value
+
+    def _as_dict(self, finding: Finding) -> dict:
+        result = asdict(finding)
+        result["value"] = self._value(finding.value)
+        result["context"] = self._value(finding.context)
+        return result
 
     def print_console(self):
         if not self.findings:
@@ -44,7 +58,7 @@ class ReportGenerator:
                     f"\n  {C.BOLD}{C.WHITE}{subcat}{C.RESET}  ({len(items)})"
                 )
                 for item in items[:60]:
-                    val = item.value[:130].replace("\n", " ")
+                    val = self._value(item.value, 130).replace("\n", " ")
                     tool_tag = (
                         f" [{item.tool}]" if item.tool != "native" else ""
                     )
@@ -74,7 +88,7 @@ class ReportGenerator:
     def save(self, out_path: Path, fmt: str = "json"):
         if fmt == "json":
             out_path.write_text(
-                json.dumps([asdict(f) for f in self.findings], indent=2)
+                json.dumps([self._as_dict(f) for f in self.findings], indent=2)
             )
         elif fmt == "csv":
             self._save_csv(out_path)
@@ -84,6 +98,8 @@ class ReportGenerator:
             self._save_text(out_path)
         elif fmt == "html":
             self._save_html(out_path)
+        elif fmt == "sarif":
+            self._save_sarif(out_path)
         success(f"Report → {out_path}")
 
     def _save_csv(self, out_path: Path):
@@ -103,7 +119,8 @@ class ReportGenerator:
             w = csv.DictWriter(fh, fieldnames=fields)
             w.writeheader()
             for f in self.findings:
-                w.writerow({k: getattr(f, k) for k in fields})
+                row = self._as_dict(f)
+                w.writerow({k: row[k] for k in fields})
 
     def _save_markdown(self, out_path: Path):
         ts = datetime.now().isoformat()
@@ -126,7 +143,7 @@ class ReportGenerator:
                 md.append("| File | Line | Tool | Value |")
                 md.append("|------|------|------|-------|")
                 for item in items[:200]:
-                    v = item.value[:100].replace("|", "\\|").replace("\n", " ")
+                    v = self._value(item.value, 100).replace("|", "\\|").replace("\n", " ")
                     md.append(
                         f"| `{item.file}` | {item.line} | {item.tool} | `{v}` |"
                     )
@@ -139,7 +156,7 @@ class ReportGenerator:
             lines += [
                 f"[{f.severity}] {f.subcategory} (via {f.tool})",
                 f"  File: {f.file}:{f.line}",
-                f"  Value: {f.value[:250]}",
+                f"  Value: {self._value(f.value, 250)}",
                 "",
             ]
         out_path.write_text("\n".join(lines), encoding="utf-8")
@@ -155,7 +172,7 @@ class ReportGenerator:
         rows = ""
         for f in self.findings:
             col = sev_colors.get(f.severity, "#888")
-            v = f.value[:200].replace("<", "&lt;").replace(">", "&gt;")
+            v = self._value(f.value, 200).replace("<", "&lt;").replace(">", "&gt;")
             rows += (
                 f'<tr><td><span style="background:{col};padding:2px 6px;'
                 f'border-radius:3px;color:#000">{f.severity}</span></td>'
@@ -179,6 +196,27 @@ tr:hover{{background:#111}}
 {rows}
 </table></body></html>"""
         out_path.write_text(html, encoding="utf-8")
+
+    def _save_sarif(self, out_path: Path):
+        """Write SARIF 2.1.0 for GitHub and other code-scanning consumers."""
+        level_map = {"CRITICAL": "error", "HIGH": "error", "MEDIUM": "warning", "LOW": "note", "INFO": "note"}
+        rules, results = {}, []
+        for finding in self.findings:
+            rule_id = re.sub(r"[^A-Za-z0-9_.-]+", "-", f"{finding.category}.{finding.subcategory}")
+            rules.setdefault(rule_id, {
+                "id": rule_id,
+                "name": finding.subcategory,
+                "shortDescription": {"text": finding.subcategory},
+                "properties": {"severity": finding.severity, "tool": finding.tool},
+            })
+            results.append({
+                "ruleId": rule_id,
+                "level": level_map.get(finding.severity, "note"),
+                "message": {"text": self._value(finding.value, 600)},
+                "locations": [{"physicalLocation": {"artifactLocation": {"uri": finding.file}, "region": {"startLine": max(1, finding.line)}}}],
+            })
+        payload = {"version": "2.1.0", "$schema": "https://json.schemastore.org/sarif-2.1.0.json", "runs": [{"tool": {"driver": {"name": "jsmap", "rules": list(rules.values())}}, "results": results}]}
+        out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def write_summary(
