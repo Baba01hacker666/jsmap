@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from core.logger import C
+from .logger import C
 
 @dataclass
 class Finding:

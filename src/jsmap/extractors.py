@@ -9,8 +9,8 @@ from typing import List, Dict, Optional, Callable, Any
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 
-from core.logger import info, success, warn, error, substep
-from core.models import Finding
+from .logger import info, success, warn, error, substep
+from .models import Finding
 
 class BaseExtractor(ABC):
     @property
@@ -546,6 +546,7 @@ class ExtractorOrchestrator:
     def register(self, extractor: BaseExtractor):
         self.extractors.append(extractor)
         info(f"Registered extractor: {extractor.name}")
+        return self
 
     def analyze(self, dir_path: Path) -> List[Finding]:
         all_findings = []

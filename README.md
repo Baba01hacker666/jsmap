@@ -9,7 +9,7 @@
  ╚════╝ ╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝           ╚══════╝ ╚═════╝ ╚═╝   ╚═╝   ╚══════╝
 ```
 
-**Enhanced Modular JavaScript Recon Suite** — Webpack chunk harvesting, secret/endpoint extraction, source map reconstruction, and Angular build integration for web application security assessments.
+**Enhanced Modular JavaScript Analyzer** — a pip-installable toolkit for analyzing JavaScript assets you own or are authorized to assess. It supports asset discovery, source-map recovery, endpoint/configuration detection, structured reporting, and optional Angular build validation.
 
 > Developed by **baba01hacker** · [Doraemon Cyber Team (DCT)](https://github.com/Baba01hacker666)
 
@@ -24,15 +24,15 @@
 ```bash
 git clone https://github.com/Baba01hacker666/jsmap
 cd jsmap
-pip install requests urllib3
+python -m pip install .
+
+# Development install (tests and package build tools)
+python -m pip install -e ".[dev]"
 ```
 
 **Optional external tools (for `--all-extractors`):**
 
 ```bash
-# TruffleHog
-curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh
-
 # ripgrep
 apt install ripgrep   # Debian/Ubuntu
 brew install ripgrep  # macOS
@@ -48,12 +48,12 @@ npm install -g @angular/cli
 
 ## Overview
 
-jsmap-suite is an offensive reconnaissance tool targeting modern JavaScript-heavy web applications (Angular, React, Webpack). It automates the full recon pipeline from chunk discovery to source recovery, surfacing hardcoded secrets, internal API endpoints, environment configs, and debug artifacts that developers accidentally ship to production.
+jsmap supports modern JavaScript-heavy applications (Angular, React, Webpack, Next.js, Vue, and static bundles). Use it only for applications and artifacts you own or are explicitly authorized to assess.
 
 **4-phase pipeline:**
 
 ```
-Phase 1: Download    →  Auto-detect runtime.js, extract chunk map, download all JS chunks + .map files
+Phase 1: Download    →  Auto-detect runtime.js, extract chunk map, download JS chunks + .map files
 Phase 2: Extract     →  Multi-engine analysis: native regex, TruffleHog, ripgrep
 Phase 3: Reconstruct →  Source tree recovery from .map files
 Phase 4: Build       →  Scaffold Angular project + ng build --configuration production (Optional)
@@ -113,56 +113,57 @@ Phase 4: Build       →  Scaffold Angular project + ng build --configuration pr
 ## Usage
 
 ```
-python3 jsmap_suite.py [URL] [OPTIONS]
+jsmap [URL] [OPTIONS]
+# equivalent: python -m jsmap [URL] [OPTIONS]
 ```
 
 ### Basic Examples
 
 ```bash
-# Full recon against a target
-python3 jsmap_suite.py https://app.target.com/
+# Analyze a locally saved asset directory (no network access)
+jsmap --analyze-only --dir ./assets -o ./jsmap-report
 
 # Full pipeline with all extractors + Angular build
-python3 jsmap_suite.py https://app.target.com/ --all-extractors --ng-build
+jsmap https://app.target.com/ --all-extractors --ng-build
 
 # Extract sources and run ng build
-python3 jsmap_suite.py https://app.target.com/ --extract-sources --ng-build
+jsmap https://app.target.com/ --extract-sources --ng-build
 
 # Use TruffleHog + ripgrep alongside native regex
-python3 jsmap_suite.py https://app.target.com/ --use-trufflehog --use-ripgrep
+jsmap https://app.target.com/ --use-ripgrep
 
 # Analyze an existing directory (no download)
-python3 jsmap_suite.py --analyze-only --dir ./jsmap_target_20250101/chunks/
+jsmap --analyze-only --dir ./jsmap_target_20250101/chunks/
 
 # Download only, save to custom output directory
-python3 jsmap_suite.py https://app.target.com/ --download-only -o /tmp/recon
+jsmap https://app.target.com/ --download-only -o /tmp/recon
 
 # Run ng build on an existing ng_project (skip download/analysis)
-python3 jsmap_suite.py --ng-only -o /tmp/recon/existing_output/
+jsmap --ng-only -o /tmp/recon/existing_output/
 
 # Only show CRITICAL and HIGH findings
-python3 jsmap_suite.py https://app.target.com/ --severity HIGH
+jsmap https://app.target.com/ --severity HIGH
 
 # Authenticated target with Burp proxy
-python3 jsmap_suite.py https://app.target.com/ \
+jsmap https://app.target.com/ \
     --cookie "session=abc123; auth=xyz" \
     --proxy http://127.0.0.1:8080 \
     --no-verify
 
 # Custom headers + dump all strings
-python3 jsmap_suite.py https://app.target.com/ \
+jsmap https://app.target.com/ \
     -H "Authorization: Bearer <token>" \
     -H "X-Custom-Header: value" \
     --strings
 
 # Supply a chunk map JSON manually (bypass auto-detection)
-python3 jsmap_suite.py https://app.target.com/ --map ./chunk_map.json
+jsmap https://app.target.com/ --map ./chunk_map.json
 
 # Output in Markdown format with 10 threads
-python3 jsmap_suite.py https://app.target.com/ --format md -t 10
+jsmap https://app.target.com/ --format md -t 10
 
 # Rate-limited (500ms delay between requests), verbose
-python3 jsmap_suite.py https://app.target.com/ -d 0.5 -v
+jsmap https://app.target.com/ -d 0.5 -v
 ```
 
 ---
@@ -236,6 +237,43 @@ jsmap_<host>_<timestamp>/
 │   ├── download.log        Per-chunk download log (JSON)
 │   └── build.log           npm install + ng build output
 └── summary.json            Top-level scan summary with finding counts
+```
+
+## Python API
+
+Use the API when you want to include local asset analysis in a CI job or another Python tool. It makes no network requests.
+
+```python
+from jsmap import ScanOptions, analyze_directory
+
+result = analyze_directory(
+    "./saved-assets",
+    "./analysis-output",
+    ScanOptions(
+        minimum_severity="MEDIUM",
+        extract_sources=True,
+        extract_strings=True,
+        report_format="md",
+    ),
+)
+
+print(result.finding_count)
+print(result.report_paths["json"])
+```
+
+The public package modules are organized as follows:
+
+```
+src/jsmap/
+├── api.py             Stable local-analysis API and result models
+├── cli.py             Command-line interface and workflow coordinator
+├── downloader.py      Asset and source-map retrieval
+├── extractors.py      Native and optional extractor implementations
+├── reconstructor.py   Source-map reconstruction and string extraction
+├── reporting.py       JSON, CSV, Markdown, text, and HTML reports
+├── layout.py          Output directory contract
+├── network.py         HTTP session configuration
+└── builder.py         Optional Angular build integration
 ```
 
 ---

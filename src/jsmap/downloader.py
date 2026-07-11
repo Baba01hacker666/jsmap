@@ -9,8 +9,8 @@ from urllib.parse import urljoin
 from typing import List, Dict, Optional, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from core.logger import C, info, success, warn, error, substep
-from core.layout import OutputLayout
+from .logger import C, info, success, warn, error, substep
+from .layout import OutputLayout
 
 class ChunkDownloader:
     """Robust Webpack chunk downloader with structured output support."""

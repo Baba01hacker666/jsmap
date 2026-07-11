@@ -4,8 +4,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from core.logger import error, substep, success, dim
-from core.layout import OutputLayout
+from .logger import error, substep, success, dim
+from .layout import OutputLayout
 
 class AngularBuilder:
     """

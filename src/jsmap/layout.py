@@ -1,5 +1,5 @@
 from pathlib import Path
-from core.logger import C, info
+from .logger import C, info
 
 class OutputLayout:
     """

@@ -5,19 +5,20 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from core.logger import C, banner, error, warn, info, success, critical, step
-from core.layout import OutputLayout
-from core.network import build_session
-from core.downloader import ChunkDownloader
-from core.extractors import (
+from .logger import C, banner, error, warn, info, success, critical, step
+from .layout import OutputLayout
+from .network import build_session
+from .downloader import ChunkDownloader
+from .extractors import (
     ExtractorOrchestrator,
     NativeRegexExtractor,
     TruffleHogExtractor,
     RipgrepExtractor,
 )
-from core.reconstructor import SourceMapReconstructor
-from core.builder import AngularBuilder
-from core.reporting import ReportGenerator, write_summary
+from .reconstructor import SourceMapReconstructor
+from .builder import AngularBuilder
+from .reporting import ReportGenerator, write_summary
+from . import __version__
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +45,7 @@ EXAMPLES:
     )
 
     parser.add_argument("url", nargs="?", default=None, help="Target URL")
+    parser.add_argument("--version", action="version", version=f"jsmap {__version__}")
     parser.add_argument(
         "--download-only", action="store_true", help="Phase 1 only"
     )
@@ -150,8 +152,17 @@ def validate_args(args, parser: argparse.ArgumentParser):
         parser.print_help()
         sys.exit(1)
     if args.analyze_only and not args.dir:
-        error("--analyze-only requires --dir")
-        sys.exit(1)
+        parser.error("--analyze-only requires --dir")
+    if args.analyze_only and not Path(args.dir).is_dir():
+        parser.error(f"Directory does not exist: {args.dir}")
+    if args.url and urlparse(args.url).scheme not in {"http", "https"}:
+        parser.error("URL must start with http:// or https://")
+    if args.threads < 1:
+        parser.error("--threads must be at least 1")
+    if args.delay < 0:
+        parser.error("--delay cannot be negative")
+    if args.ng_only and args.analyze_only:
+        parser.error("--ng-only cannot be combined with --analyze-only")
 
 
 def resolve_output_root(args) -> Path:

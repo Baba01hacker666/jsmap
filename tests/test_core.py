@@ -5,9 +5,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # Import the new core modules
-from core.extractors import NativeRegexExtractor
-from core.downloader import ChunkDownloader
-from core.reconstructor import SourceMapReconstructor
+from jsmap.extractors import NativeRegexExtractor
+from jsmap.downloader import ChunkDownloader
+from jsmap.reconstructor import SourceMapReconstructor
 
 class TestNativeRegexExtractor(unittest.TestCase):
     def setUp(self):

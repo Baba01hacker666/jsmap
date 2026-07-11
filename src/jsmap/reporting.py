@@ -5,9 +5,9 @@ from pathlib import Path
 from dataclasses import asdict
 from typing import List, Optional
 
-from core.logger import C, warn, section, success
-from core.models import Finding
-from core.layout import OutputLayout
+from .logger import C, warn, section, success
+from .models import Finding
+from .layout import OutputLayout
 
 class ReportGenerator:
     SEV_ICON = {

@@ -3,8 +3,8 @@ import re
 from pathlib import Path
 from typing import Optional, Dict
 
-from core.logger import warn, success
-from core.layout import OutputLayout
+from .logger import warn, success
+from .layout import OutputLayout
 
 class SourceMapReconstructor:
     """Extract source files from .map and prep for ng build."""
