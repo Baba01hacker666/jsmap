@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jsmap"
-version = "0.2.0"
+version = "0.3.0"
 description = "JavaScript asset analyzer with source-map recovery and security reporting"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -22,7 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
-dependencies = ["requests>=2.28", "urllib3>=1.26"]
+dependencies = ["requests>=2.28", "urllib3>=1.26", "jsbeautifier>=2.0.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "build>=1.2", "twine>=5.0"]
@@ -39,4 +39,5 @@ packages = ["src/jsmap"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 addopts = "-q"

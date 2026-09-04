@@ -24,8 +24,14 @@ class BaseExtractor(ABC):
         pass
 
     @abstractmethod
-    def analyze_file(self, filepath: Path) -> List[Finding]:
+    def analyze_file(self, filepath: Path, base_dir: Optional[Path] = None) -> List[Finding]:
         pass
+
+    def _analyze_file_with_base(self, file_path: Path, base_dir: Path) -> List[Finding]:
+        try:
+            return self.analyze_file(file_path, base_dir=base_dir)
+        except TypeError:
+            return self.analyze_file(file_path)
 
     def analyze_directory(self, dir_path: Path) -> List[Finding]:
         supported = set(self.supported_extensions)
@@ -45,7 +51,7 @@ class BaseExtractor(ABC):
             for file_path in dir_path.rglob("*"):
                 if not file_path.is_file() or file_path.suffix not in supported:
                     continue
-                pending.add(executor.submit(self.analyze_file, file_path))
+                pending.add(executor.submit(self._analyze_file_with_base, file_path, dir_path))
                 if len(pending) >= queue_limit:
                     done, pending = wait(
                         pending, return_when=FIRST_COMPLETED
@@ -210,6 +216,41 @@ class NativeRegexExtractor(BaseExtractor):
                 ],
             },
             {
+                "name": "OpenAI API Key",
+                "severity": "CRITICAL",
+                "patterns": [
+                    r"(sk-[A-Za-z0-9]{48}|sk-proj-[A-Za-z0-9\-_]{48,})"
+                ],
+            },
+            {
+                "name": "Anthropic API Key",
+                "severity": "CRITICAL",
+                "patterns": [
+                    r"(sk-ant-[A-Za-z0-9\-_]{40,})"
+                ],
+            },
+            {
+                "name": "Hugging Face Token",
+                "severity": "CRITICAL",
+                "patterns": [
+                    r"(hf_[A-Za-z0-9]{34})"
+                ],
+            },
+            {
+                "name": "GitLab Token",
+                "severity": "CRITICAL",
+                "patterns": [
+                    r"(glpat-[0-9a-zA-Z\-_]{20})"
+                ],
+            },
+            {
+                "name": "SendGrid API Key",
+                "severity": "CRITICAL",
+                "patterns": [
+                    r"(SG\.[A-Za-z0-9_\-\.]{66})"
+                ],
+            },
+            {
                 "name": "Generic Secret",
                 "severity": "HIGH",
                 "patterns": [
@@ -257,7 +298,7 @@ class NativeRegexExtractor(BaseExtractor):
         ],
         "frameworks": [
             {
-                "name": "Angular Route",
+                "name": "SPA Route (React / Angular / Vue)",
                 "severity": "INFO",
                 "patterns": [
                     r'path\s*:\s*["\']([^"\']{1,150})["\']',
@@ -371,12 +412,18 @@ class NativeRegexExtractor(BaseExtractor):
     def _dedup(self, cat: str, val: str) -> str:
         return hashlib.md5(f"{cat}:{val[:80]}".encode()).hexdigest()
 
-    def analyze_file(self, filepath: Path) -> List[Finding]:
+    def analyze_file(self, filepath: Path, base_dir: Optional[Path] = None) -> List[Finding]:
         try:
             content = filepath.read_text(encoding="utf-8", errors="ignore")
         except Exception as e:
             error(f"Cannot read {filepath.name}: {e}")
             return []
+
+        file_label = (
+            str(filepath.relative_to(base_dir))
+            if base_dir and filepath.is_relative_to(base_dir)
+            else filepath.name
+        )
 
         lines = content.splitlines()
         findings = []
@@ -429,7 +476,7 @@ class NativeRegexExtractor(BaseExtractor):
                                     subcategory=name,
                                     value=value[:600],
                                     severity=severity,
-                                    file=filepath.name,
+                                    file=file_label,
                                     line=line_no,
                                     context=context[:350],
                                     tool=self.name,

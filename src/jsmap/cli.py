@@ -86,6 +86,32 @@ EXAMPLES:
     dl.add_argument("-m", "--map", help="JSON chunk map file")
     dl.add_argument("-t", "--threads", type=int, default=5)
     dl.add_argument("-d", "--delay", type=float, default=0.0)
+    dl.add_argument(
+        "--crawl-esm",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Recursively crawl ES module import graphs when source files like main.tsx are linked (default: true)",
+    )
+    dl.add_argument(
+        "--deep",
+        action="store_true",
+        help="Deep mode: scan bundles for lazy-loaded chunks, dynamic imports, and retry reconstruction/build",
+    )
+
+    # Beautification & Debundling
+    bt = parser.add_argument_group("Beautification & Debundling")
+    bt.add_argument(
+        "--beautify",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Format, indent, and de-minify downloaded chunks and recovered source files (default: true)",
+    )
+    bt.add_argument(
+        "--debundle",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Debundle and slice Webpack/Vite/Rollup chunks into modules when no sourcemaps exist (default: true)",
+    )
 
     # Analysis options
     an = parser.add_argument_group("Analysis")
@@ -163,10 +189,21 @@ def validate_args(args, parser: argparse.ArgumentParser):
         sys.exit(1)
     if args.analyze_only and not args.dir:
         parser.error("--analyze-only requires --dir")
-    if args.analyze_only and not Path(args.dir).is_dir():
-        parser.error(f"Directory does not exist: {args.dir}")
-    if args.url and urlparse(args.url).scheme not in {"http", "https"}:
-        parser.error("URL must start with http:// or https://")
+    if args.analyze_only and not Path(args.dir).exists():
+        parser.error(f"Directory or file does not exist: {args.dir}")
+
+    # If url is provided, check if it's an existing local file or directory
+    if args.url:
+        p = Path(args.url)
+        if p.exists():
+            args.analyze_only = True
+            args.dir = str(p.resolve())
+            if str(args.url).lower().endswith(".map"):
+                args.extract_sources = True
+        else:
+            if urlparse(args.url).scheme not in {"http", "https"}:
+                parser.error("Target must be a URL starting with http:// or https://, or an existing local file / directory")
+
     if args.threads < 1:
         parser.error("--threads must be at least 1")
     if args.delay < 0:
@@ -179,6 +216,10 @@ def resolve_output_root(args) -> Path:
     if args.output:
         return Path(args.output)
     if args.url:
+        p = Path(args.url)
+        if p.exists():
+            clean_name = p.stem.replace(":", "_").replace(" ", "_")
+            return Path(f"jsmap_{clean_name}_{datetime.now():%Y%m%d_%H%M%S}")
         host = urlparse(args.url).netloc.replace(":", "_")
         return Path(f"jsmap_{host}_{datetime.now():%Y%m%d_%H%M%S}")
     return Path(f"jsmap_analysis_{datetime.now():%Y%m%d_%H%M%S}")
@@ -229,12 +270,20 @@ def main():
     src_dir = None
     findings = []
     build_ok = None
+    session = None
 
     if not args.analyze_only:
         step(1, "DOWNLOADING CHUNKS")
         session = build_session(args)
         downloader = ChunkDownloader(
-            session, args.url, layout, args.threads, args.delay
+            session,
+            args.url,
+            layout,
+            args.threads,
+            args.delay,
+            crawl_esm=args.crawl_esm,
+            deep=args.deep,
+            beautify=args.beautify,
         )
 
         chunk_map, special_names, extra_scripts = {}, {}, []
@@ -267,13 +316,28 @@ def main():
     step(2, "EXTRACTING & ANALYZING")
     orchestrator = configure_extractors(args)
 
-    findings = orchestrator.analyze(chunks_dir)
+    if chunks_dir.is_dir():
+        findings = orchestrator.analyze(chunks_dir)
+    elif chunks_dir.is_file():
+        findings = NativeRegexExtractor(args.severity).analyze_file(chunks_dir)
+    else:
+        findings = []
 
     # ── Phase 3: Reconstruct ──────────────────────────────────────────────────
     if args.extract_sources or args.ng_build:
         step(3, "RECONSTRUCTING SOURCES")
-        recon = SourceMapReconstructor(layout)
+        recon = SourceMapReconstructor(
+            layout,
+            session=session,
+            base_url=getattr(args, "url", None),
+            beautify=args.beautify,
+            debundle=args.debundle,
+        )
         src_dir = recon.extract(chunks_dir)
+
+        if not src_dir and getattr(args, "deep", False):
+            info("Deep mode: retrying source reconstruction across discovered chunks and maps...")
+            src_dir = recon.extract(chunks_dir)
 
         if src_dir:
             info("Re-analyzing extracted sources for additional findings...")
@@ -289,14 +353,18 @@ def main():
                     }.values()
                 )
 
-        if args.strings:
-            recon.extract_strings(chunks_dir)
+    if args.strings:
+        recon = SourceMapReconstructor(layout)
+        recon.extract_strings(chunks_dir)
 
     # ── Phase 4: ng build ─────────────────────────────────────────────────────
     if args.ng_build:
         step(4, "ANGULAR BUILD  [ng build --configuration production]")
         builder = AngularBuilder(layout, args.ng_version)
         build_ok = builder.run(extracted_sources=src_dir)
+        if not build_ok and getattr(args, "deep", False):
+            warn("Deep mode: retrying ng build verification...")
+            build_ok = builder.run(extracted_sources=src_dir)
 
     # ── Reporting ─────────────────────────────────────────────────────────────
     reporter = ReportGenerator(findings, redact_values=args.redact)
@@ -347,3 +415,8 @@ def main():
         if any(severity_order.index(f.severity) <= severity_order.index(args.fail_on) for f in findings):
             warn(f"Failing due to --fail-on {args.fail_on}")
             sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+

@@ -12,11 +12,20 @@ DEFAULT_HEADERS = {
     ),
     "Accept": "*/*",
     "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
+    "Accept-Encoding": "gzip, deflate",
     "Connection": "keep-alive",
 }
 
-def build_session(args) -> requests.Session:
+from typing import Any, Dict, List, Optional, Union
+
+def build_session(
+    args: Any = None,
+    url: Optional[str] = None,
+    proxy: Optional[str] = None,
+    no_verify: bool = False,
+    cookie: Optional[str] = None,
+    header: Optional[Union[List[str], Dict[str, str]]] = None,
+) -> requests.Session:
     session = requests.Session()
     
     # OPSEC: Add retry logic with exponential backoff for WAFs / throttling
@@ -37,18 +46,30 @@ def build_session(args) -> requests.Session:
     ]
     headers["User-Agent"] = random.choice(user_agents)
     
-    if hasattr(args, "url") and args.url:
-        headers["Referer"] = args.url
+    eff_url = getattr(args, "url", None) or url
+    if eff_url:
+        headers["Referer"] = eff_url
     session.headers.update(headers)
-    if getattr(args, "proxy", None):
-        session.proxies = {"http": args.proxy, "https": args.proxy}
-    if getattr(args, "no_verify", False):
+
+    eff_proxy = getattr(args, "proxy", None) or proxy
+    if eff_proxy:
+        session.proxies = {"http": eff_proxy, "https": eff_proxy}
+
+    eff_no_verify = getattr(args, "no_verify", False) or no_verify
+    if eff_no_verify:
         session.verify = False
         urllib3.disable_warnings()
-    if getattr(args, "cookie", None):
-        session.headers.update({"Cookie": args.cookie})
-    if getattr(args, "header", None):
-        for hdr in args.header:
-            k, _, v = hdr.partition(":")
-            session.headers.update({k.strip(): v.strip()})
+
+    eff_cookie = getattr(args, "cookie", None) or cookie
+    if eff_cookie:
+        session.headers.update({"Cookie": eff_cookie})
+
+    eff_header = getattr(args, "header", None) or header
+    if eff_header:
+        if isinstance(eff_header, dict):
+            session.headers.update(eff_header)
+        else:
+            for hdr in eff_header:
+                k, _, v = hdr.partition(":")
+                session.headers.update({k.strip(): v.strip()})
     return session

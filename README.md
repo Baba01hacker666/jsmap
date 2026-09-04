@@ -87,6 +87,11 @@ Phase 4: Build       →  Scaffold Angular project + ng build --configuration pr
 | Secrets | AWS Access Key ID (`AKIA...`) | CRITICAL |
 | Secrets | AWS Secret Key | CRITICAL |
 | Secrets | Google API Key (`AIza...`) | CRITICAL |
+| Secrets | OpenAI API Key (`sk-...`, `sk-proj-...`) | CRITICAL |
+| Secrets | Anthropic API Key (`sk-ant-...`) | CRITICAL |
+| Secrets | Hugging Face Token (`hf_...`) | CRITICAL |
+| Secrets | GitLab Token (`glpat-...`) | CRITICAL |
+| Secrets | SendGrid API Key (`SG...`) | CRITICAL |
 | Secrets | Stripe Live/Test Key | CRITICAL |
 | Secrets | JWT Token | CRITICAL |
 | Secrets | Private Key (PEM) | CRITICAL |
@@ -113,15 +118,26 @@ Phase 4: Build       →  Scaffold Angular project + ng build --configuration pr
 ## Usage
 
 ```
-jsmap [URL] [OPTIONS]
-# equivalent: python -m jsmap [URL] [OPTIONS]
+jsmap [TARGET] [OPTIONS]
+# TARGET can be a URL, a local directory, or a local .map / .js file!
 ```
 
 ### Basic Examples
 
 ```bash
+# Reconstruct source code directly from a local .map file (like restore-source-tree or unwebpack)
+jsmap ./bundle.js.map -o ./recovered_src
+
+# Unpack inline sourcemaps from JS files in a local directory
+jsmap ./dist --extract-sources -o ./recovered_src
+
+# Reconstruct source code directly from a remote .map or .js URL
+jsmap https://app.target.com/assets/main.js.map -o ./recovered_src
+
 # Analyze a locally saved asset directory (no network access)
 jsmap --analyze-only --dir ./assets -o ./jsmap-report
+# Equivalent shortcut:
+jsmap ./assets -o ./jsmap-report
 
 # Full pipeline with all extractors + Angular build
 jsmap https://app.target.com/ --all-extractors --ng-build
@@ -193,6 +209,17 @@ download:
   -m, --map FILE            JSON chunk map file (skip auto-detection)
   -t, --threads N           Download threads (default: 5)
   -d, --delay SECONDS       Per-request delay (default: 0.0)
+  --crawl-esm / --no-crawl-esm
+                            Recursively crawl ES module import graphs when source files
+                            like main.tsx are linked (default: true)
+  --deep                    Deep crawl downloaded JS chunks for lazy-loaded modules,
+                            dynamic imports, and secondary chunks; retry build
+  --beautify / --no-beautify
+                            Format, indent, and de-minify downloaded chunks and recovered
+                            source files (default: true)
+  --debundle / --no-debundle
+                            Debundle and slice Webpack/Vite/Rollup chunks into modules
+                            when no sourcemaps exist (default: true)
 
 analysis:
   --severity LEVEL          Minimum severity to report: CRITICAL HIGH MEDIUM LOW INFO (default: INFO)
@@ -220,6 +247,43 @@ network:
 
 ---
 
+## What If No `.map` File Exists? (e.g. `main.tsx` Linked Directly)
+
+In modern frontend frameworks (Vite, Astro, Next.js, Remix, SvelteKit) running in development, preview, or misconfigured production mode, there are often **no `.map` files at all**. Instead, `index.html` contains:
+
+```html
+<script type="module" src="/src/main.tsx"></script>
+```
+
+`jsmap` handles this scenario seamlessly through 4 layers of automated discovery:
+
+1. **Modern Module Discovery:**
+   - Detects `<script type="module" src="...">`, `<link rel="modulepreload" href="...">`, and direct links to `.tsx`, `.ts`, `.jsx`, `.vue`, and `.svelte` files.
+   - Preserves source file extensions and relative directory structures (e.g., `src/main.tsx`).
+
+2. **Recursive ESM Import Graph Crawling (`--crawl-esm`):**
+   - Automatically parses ES module `import` and `export` statements (static imports, dynamic `import()`, re-exports).
+   - Resolves relative paths (`./App.tsx`, `../components/Button`) and handles extensionless TypeScript/JavaScript imports (`./Header` → `./Header.tsx`, `./Header.ts`, etc.).
+   - Recursively downloads the entire original application source tree.
+
+3. **Webpack `eval()` with `sourceURL` Recovery:**
+   - In Webpack development bundles (`devtool: 'eval'` or `eval-source-map`), modules are wrapped in `eval("... //# sourceURL=webpack:///./src/main.tsx")`.
+   - `jsmap` parses and unescapes the code inside each `eval()` block and saves original files directly into `extracted_sources/` without requiring any `.map` file.
+
+4. **Live Fallback for Missing `sourcesContent`:**
+   - If a `.map` file is present but its `sourcesContent` field was stripped (`null`), `jsmap` automatically probes the live web server for each missing source path (e.g. `https://target.com/src/main.tsx`).
+
+5. **Automated Code Beautification & De-minification (`--beautify`):**
+   - Automatically de-minifies obfuscated constructs: expands minified booleans (`!0` → `true`, `!1` → `false`), expands `void 0` → `undefined`, formats keywords (`return!0` → `return true`), and safely unescapes unicode strings.
+   - Formats JavaScript, TypeScript, CSS, and HTML with consistent 2-space indentation and line breaks, transforming 500 KB single-line blobs into readable, auditable code.
+
+6. **Automated Debundling & Architecture Blueprint (`--debundle`):**
+   - Slices Webpack chunk registries (`webpackChunk`, `webpackJsonp`, module arrays) into individual component and service files.
+   - For Rollup/Vite/ESBuild bundles, extracts beautified source versions into `extracted_sources/beautified/`.
+   - Generates `extracted_sources/ARCHITECTURE.md`, outlining all discovered frontend routes, API endpoints, key components, client storage keys, and data models directly from the minified bundles!
+
+---
+
 ## Output Structure
 
 ```
@@ -242,26 +306,121 @@ jsmap_<host>_<timestamp>/
 └── summary.json            Top-level scan summary with finding counts
 ```
 
-## Python API
+## Python API & Scripting Usage
 
-Use the API when you want to include local asset analysis in a CI job or another Python tool. It makes no network requests.
+`jsmap` provides a complete, modern Python API so you can use it directly in other scripts, automation pipelines, security tools, and CI/CD jobs.
+
+### 1. Source Map Reconstruction & In-Memory Unpacking
 
 ```python
-from jsmap import ScanOptions, analyze_directory
+import jsmap
 
-result = analyze_directory(
-    "./saved-assets",
-    "./analysis-output",
-    ScanOptions(
-        minimum_severity="MEDIUM",
+# Reconstruct original source files from a .map file, a .js file, or a directory:
+result = jsmap.reconstruct("bundle.js.map", output_dir="./extracted_sources")
+print(f"Extracted {result.total_files} files into {result.sources_directory}")
+
+# In-memory unpacking without writing to disk:
+sources = jsmap.unpack_sourcemap("bundle.js.map")
+for file_path, code in sources.items():
+    print(f"Source file: {file_path} ({len(code)} bytes)")
+```
+
+### 2. Scanning Code Snippets & Single Files
+
+```python
+import jsmap
+
+# Quickly scan an in-memory snippet for secrets and endpoints:
+findings = jsmap.scan_code("const apiKey = 'AKIAIOSFODNN7EXAMPLE';")
+for f in findings:
+    print(f"{f.severity} [{f.subcategory}] in {f.file}:{f.line} -> {f.value}")
+
+# Scan a single JavaScript or TypeScript file:
+file_findings = jsmap.scan_file("app.bundle.js", minimum_severity="HIGH")
+```
+
+### 3. Extracting Endpoints, URLs, Emails & IPs
+
+```python
+import jsmap
+
+strings = jsmap.extract_strings("app.bundle.js")
+print("Found URLs:", strings["urls"])
+print("Found API Paths:", strings["paths"])
+print("Found Emails:", strings["emails"])
+print("Found IP Addresses:", strings["ips"])
+```
+
+### 4. Full Directory / Asset Analysis
+
+```python
+import jsmap
+
+result = jsmap.analyze(
+    target="./saved-assets",
+    output="./analysis-output",
+    options=jsmap.ScanOptions(
+        minimum_severity="HIGH",
         extract_sources=True,
         extract_strings=True,
-        report_format="md",
+        report_format="sarif",
     ),
 )
 
-print(result.finding_count)
-print(result.report_paths["json"])
+print(f"Total findings: {result.finding_count}")
+print(f"Critical findings: {len(result.critical_findings)}")
+if result.has_severity_at_least("CRITICAL"):
+    print("Found critical security vulnerabilities!")
+```
+
+### 5. Programmatic Asset Downloading
+
+```python
+import jsmap
+
+download_result = jsmap.download(
+    "https://app.target.com",
+    output="./downloads",
+    threads=5,
+    deep=True,            # Deep crawl for lazy-loaded modules and dynamic imports
+    beautify=True,        # Automatically format & de-minify downloaded chunks
+    extract_sources=True, # Automatically unpacks sourcemaps or falls back to debundling!
+)
+```
+
+### 6. Standalone Code Beautification & De-minification
+
+```python
+import jsmap
+
+# De-minify and format JavaScript/TypeScript code:
+raw_js = "function test(a){if(a===!0)return!1;else return void 0;}"
+readable = jsmap.beautify_code(raw_js)
+print(readable)
+# function test(a) {
+#   if (a === true) return false;
+#   else return undefined;
+# }
+
+# Format an entire file or directory:
+jsmap.beautify_file("bundle.min.js", output_path="bundle.readable.js")
+```
+
+### 7. Module Debundling & Architecture Blueprint
+
+```python
+import jsmap
+
+# Debundle a monolithic Webpack or Vite chunk without source maps:
+result = jsmap.debundle("bundle.js", output_dir="./extracted_modules")
+print(f"Extracted {result.total_modules} modules")
+print(f"Discovered routes: {result.routes}")
+print(f"Discovered endpoints: {result.endpoints}")
+
+# Extract architecture blueprint directly:
+blueprint = jsmap.get_architecture("bundle.js")
+print(blueprint["routes"])
+print(blueprint["components"])
 ```
 
 The public package modules are organized as follows:
@@ -269,6 +428,8 @@ The public package modules are organized as follows:
 ```
 src/jsmap/
 ├── api.py             Stable local-analysis API and result models
+├── beautifier.py      Code formatter & minification de-obfuscator (JS, CSS, HTML)
+├── debundler.py       Module slicer & application architecture extractor
 ├── cli.py             Command-line interface and workflow coordinator
 ├── downloader.py      Asset and source-map retrieval
 ├── extractors.py      Native and optional extractor implementations
